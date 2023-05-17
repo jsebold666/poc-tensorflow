@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Notícias</title>
+</head>
+<body>
+    <h1>Lista de Notícias</h1>
+    <ul>
+        {% for noticia in noticias %}
+        <li>
+            <h2>{{ noticia.titulo }}</h2>
+            <p>Nome: {{ noticia.nome }}</p>
+            <img src="{{ noticia.imagem }}" alt="Imagem">
+            <a href="{{ noticia.link }}">Leia mais</a>
+            <p>Cliques: {{ noticia.cliques }}</p>
+            <a href="/clique/{{ loop.index0 }}">Registrar clique</a>
+        </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
