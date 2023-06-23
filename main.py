@@ -2,7 +2,6 @@ from datetime import datetime
 import requests
 import vertexai
 from vertexai.preview.language_models import TextGenerationModel
-import requests
 from bs4 import BeautifulSoup
 import json
 import logging
@@ -10,8 +9,45 @@ import re
 from collections import defaultdict
 import html
 import unicodedata
+from flask import make_response
+from flask import Flask
+from flask_cors import CORS
+from google.cloud import bigquery
+import textwrap
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
+
+app = Flask(__name__)
+CORS(app)
+
+def conectar_e_prever(tenantId, text):
+    # Crie uma instância do cliente BigQuery
+    client = bigquery.Client()
+
+    # Defina a consulta SQL
+    query = """
+    SELECT input_text, output_text FROM `gglobo-hd-builder-ai-hdg-prd.multicontent_sample.multicontent_context` 
+    WHERE LENGTH(output_text) >= 10
+    """
+
+    query_job = client.query(query)
+    df_exemplers = query_job.to_dataframe()
+    def wrap(s):
+        return '\n'.join(textwrap.wrap(s))
+
+    # Extraia os exemplos do DataFrame
+    exemplers = [f'input_text: {input_text} \noutput_text: {output_text.strip()}'
+                 for input_text, output_text in df_exemplers.head(5).values]
+    exemplers = '\n\n'.join(exemplers)
+
+    # Defina outras variáveis necessárias
+    tenantid = tenantId
+    body = text
+
+    prompt = f"{exemplers} \n\nbody content: {body} \n context: this content is from {tenantid}, \noutput_text: "
+
+    return f"{wrap(str(prompt))}"
 
 def insert_subpath(url, subpath):
     pattern = r"(https?://(?:\w+\.)*(?:globo\.com(?:\.br)?|br))(?:/|$)"
@@ -36,16 +72,16 @@ def scrapperText(url):
             ])
         else:
             # Get tenantId from url
-            ##tenantId = (json_data['feedData']['tenantId'])
+            tenantId = (json_data['feedData']['tenantId'])
 
             # Get body from url
             body = (json_data['mainContent']['description'])
 
-        return body
+        return body, tenantId
     except:
         return None
 
-def title_generation(mensagem, temperature: float = 0.7) -> None:
+def title_generation(mensagem, tenantId, temperature: float = 0.7) -> None:
     logging.info('Iniciando o teste')
     text_model = TextGenerationModel.from_pretrained("text-bison@001")
 
@@ -57,24 +93,12 @@ def title_generation(mensagem, temperature: float = 0.7) -> None:
         "top_k": 40,  # A top_k of 1 means the selected token is the most probable among all tokens.
     }
     logging.info('send model')
+    prompt = conectar_e_prever(mensagem, tenantId)
     title = text_model.predict(
-         """ Criar títulos de matérias para a globo.com
-
-            Article: Yellowstone National Park is an American national park located in the western United States, largely in the northwest corner of Wyoming and extending into Montana and Idaho. It was established by the 42nd U.S. Congress with the Yellowstone National Park Protection Act and signed into law by President Ulysses S. Grant on March 1, 1872. Yellowstone was the first national park in the U.S. and is also widely held to be the first national park in the world. The park is known for its wildlife and its many geothermal features, especially the Old Faithful geyser, one of its most popular. While it represents many types of biomes, the subalpine forest is the most abundant. It is part of the South Central Rockies forests ecoregion.
-            The title of above article can be: Yellowstone National Park: A Natural Wonder
-
-            Article: As many businesses figure out new ways to go digital, one thing is clear: talent continues to be one of the key ways to enable an inclusive digital economy. Employers in Asia Pacific list technology as the leading in-demand skill, with digital marketing and e-commerce following close behind. Simultaneously, many people are looking to learn new skills that will help them meet the requirements of the evolving job market. So we must create new ways to help businesses and job seekers alike.
-            The title of above article can be: How to Prepare for the Digital Economy
-
-            Article: STEM Minds empowers K-12 students worldwide to reach their full potential as self-directed, life-long learners. As we grow our team, we\'ll continue to work closely with Google for Startups experts and Google for Startups Accelerator Canada advisors to further expand our AI/ML tech stack, develop additional educational solutions, and launch STEM Minds in new markets.
-            The title of above article can be: STEM Minds: Empowering K-12 Students Worldwide
-
-            Article: Acostumado a frases polêmicas e ataques a tribunais, o ex-presidente Jair Bolsonaro adotou uma postura diferente nas semanas que precederam o julgamento que pode torná-lo inelegível. Orientado por advogados e assessores, ele chegou a pedir desculpas por desinformação sobre a vacina contra a Covid-19, manteve um tom respeitoso em relação ao relator do caso, Benedito Gonçalves, e evitou criticar a indicação de Cristiano Zanin ao Supremo Tribunal Federal (STF) — seu partido, o PL, liberou a bancada, com anuência do ex-titular do Palácio do Planalto. Ao visitar o Senado ontem, porém, Bolsonaro fugiu do roteiro alinhado e adotou o que integrantes do PL classificaram como "estratégia kamikaze", como mostrou a colunista Bela Megale.
-            The title of above article can be: Bolsonaro viaja durante julgamento, e aliados tentam conter novos ataques ao TSE 
-
-            Article: """ + mensagem + """\n     The title of above article can be:""",
+            prompt,
         **parameters
     )
+    
     
     logging.info('send response from vertex')
     return title.text
@@ -91,7 +115,16 @@ def hello_world(request):
     request_json = request.get_json()
     logging.info(request_json)
     url = request_json['url']
-    mensagem = scrapperText(url)
-    resp = title_generation(mensagem)
-    res = {"title_response": resp }
-    return res
+    mensagem, tenantId = scrapperText(url)
+    resp = title_generation(mensagem, tenantId)
+    resp_normalized = unicodedata.normalize('NFKD', resp).encode('ASCII', 'ignore').decode()
+     # Criar a resposta
+    res = {"title_response": resp_normalized}
+    response = make_response(json.dumps(res))
+    
+    # Adicionar cabeçalhos CORS
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+
+    return response

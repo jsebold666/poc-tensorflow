@@ -1,3 +1,9 @@
 google-cloud-aiplatform
 requests
 beautifulsoup4
+flask
+Flask-CORS==3.0.10
+google-cloud-bigquery
+textwrap3
+pandas
+db-dtypes
