@@ -8,7 +8,6 @@ import logging
 import re
 from collections import defaultdict
 import html
-import unicodedata
 from flask import make_response
 from flask import Flask
 from flask_cors import CORS
@@ -45,7 +44,18 @@ def conectar_e_prever(tenantId, text):
     tenantid = tenantId
     body = text
 
-    prompt = f"{exemplers} \n\nbody content: {body} \n context: this content is from {tenantid}, \noutput_text: "
+    contexto_inicial = """
+    Com base nas referências fornecidas, que performaram bem, utilize a forma de escrita destes exemplos para definir o título do 'artigo' abaixo. Forneça apenas o título do 'artigo', buscando:
+    - a informação mais recente dos fatos apresentados no artigo.
+    - ser um click-bait.
+    - despertar curiosidade do usuário para que este engaje com a matéria publicada.
+    - não ser um título muito longo.
+    - se basear nas referências lá em cima, em sua forma de escrita.
+    - tente se basear no contexto de cada produto
+    """
+
+    prompt = f"{contexto_inicial} \n\n {exemplers} \n\n input: {body} Produto: esta matéria é do produto {tenantid}, \n\n output:"
+        
 
     return f"{wrap(str(prompt))}"
 
@@ -84,6 +94,7 @@ def scrapperText(url):
 def title_generation(mensagem, tenantId, temperature: float = 0.7) -> None:
     logging.info('Iniciando o teste')
     text_model = TextGenerationModel.from_pretrained("text-bison@001")
+    text_modeltuned = text_model.get_tuned_model("projects/156167028060/locations/us-central1/models/548201104446324736")
 
     # TODO developer - override these parameters as needed:
     parameters = {
@@ -94,7 +105,7 @@ def title_generation(mensagem, tenantId, temperature: float = 0.7) -> None:
     }
     logging.info('send model')
     prompt = conectar_e_prever(mensagem, tenantId)
-    title = text_model.predict(
+    title = text_modeltuned.predict(
             prompt,
         **parameters
     )
@@ -115,9 +126,14 @@ def hello_world(request):
     request_json = request.get_json()
     logging.info(request_json)
     url = request_json['url']
-    mensagem, tenantId = scrapperText(url)
+    retorno = scrapperText(url)
+    if retorno is not None:
+        mensagem, tenantId = retorno
+
+    else:
+        return make_response(json.dumps("Erro ao executar o scrapping traing again"))
     resp = title_generation(mensagem, tenantId)
-    resp_normalized = unicodedata.normalize('NFKD', resp).encode('ASCII', 'ignore').decode()
+    resp_normalized =  resp
      # Criar a resposta
     res = {"title_response": resp_normalized}
     response = make_response(json.dumps(res))
